@@ -19,9 +19,14 @@ eval(m, x) = Core.eval(m, x)
 include(x) = Core.include(Compiler, x)
 include(mod, x) = Core.include(mod, x)
 
-#############
-# from Base #
-#############
+# The real @inline macro is not available until after array.jl, so this
+# internal macro splices the meta Expr directly into the function body.
+macro _inline_meta()
+    Expr(:meta, :inline)
+end
+macro _noinline_meta()
+    Expr(:meta, :noinline)
+end
 
 # essential files and libraries
 include("essentials.jl")

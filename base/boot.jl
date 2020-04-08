@@ -187,7 +187,7 @@ export
     InterruptException, InexactError, OutOfMemoryError, ReadOnlyMemoryError,
     OverflowError, StackOverflowError, SegmentationFault, UndefRefError, UndefVarError,
     TypeError, ArgumentError, MethodError, AssertionError, LoadError, InitError,
-    UndefKeywordError,
+    UndefKeywordError, ConcurrencyViolationError,
     # AST representation
     Expr, QuoteNode, LineNumberNode, GlobalRef,
     # object model functions
@@ -289,6 +289,9 @@ struct StackOverflowError  <: Exception end
 struct UndefRefError       <: Exception end
 struct UndefVarError <: Exception
     var::Symbol
+end
+struct ConcurrencyViolationError <: Exception
+    msg::AbstractString
 end
 struct InterruptException <: Exception end
 struct DomainError <: Exception

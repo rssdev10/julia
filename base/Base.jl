@@ -20,19 +20,45 @@ include(path::String) = include(Base, path)
 const is_primary_base_module = ccall(:jl_module_parent, Ref{Module}, (Any,), Base) === Core.Main
 ccall(:jl_set_istopmod, Cvoid, (Any, Bool), Base, is_primary_base_module)
 
+# The real @inline macro is not available until after array.jl, so this
+# internal macro splices the meta Expr directly into the function body.
+macro _inline_meta()
+    Expr(:meta, :inline)
+end
+macro _noinline_meta()
+    Expr(:meta, :noinline)
+end
+
 # Try to help prevent users from shooting them-selves in the foot
 # with ambiguities by defining a few common and critical operations
 # (and these don't need the extra convert code)
-getproperty(x::Module, f::Symbol) = getfield(x, f)
-setproperty!(x::Module, f::Symbol, v) = setfield!(x, f, v)
-getproperty(x::Type, f::Symbol) = getfield(x, f)
-setproperty!(x::Type, f::Symbol, v) = setfield!(x, f, v)
-getproperty(x::Tuple, f::Int) = getfield(x, f)
+getproperty(x::Module, f::Symbol) = (@_inline_meta; getfield(x, f))
+setproperty!(x::Module, f::Symbol, v) = setfield!(x, f, v) # to get a decent error
+getproperty(x::Type, f::Symbol) = (@_inline_meta; getfield(x, f))
+setproperty!(x::Type, f::Symbol, v) = error("setfield! fields of Types should not be changed")
+getproperty(x::Tuple, f::Int) = (@_inline_meta; getfield(x, f))
 setproperty!(x::Tuple, f::Int, v) = setfield!(x, f, v) # to get a decent error
 
-getproperty(x, f::Symbol) = getfield(x, f)
-dotgetproperty(x, f) = getproperty(x, f)
+getproperty(x, f::Symbol) = (@_inline_meta; getfield(x, f))
 setproperty!(x, f::Symbol, v) = setfield!(x, f, convert(fieldtype(typeof(x), f), v))
+
+dotgetproperty(x, f) = getproperty(x, f)
+
+atomic_getproperty(x::Module, f::Symbol, order::Symbol) = (@_inline_meta; getfield(x, f, order))
+atomic_setproperty!(x::Module, f::Symbol, v, order::Symbol) = setfield!(x, f, v, order) # to get a decent error
+atomic_getproperty(x::Type, f::Symbol, order::Symbol) = (@_inline_meta; getfield(x, f, order))
+atomic_setproperty!(x::Type, f::Symbol, v, order::Symbol) = error("setfield! fields of Types should not be changed")
+atomic_getproperty(x::Tuple, f::Int, order::Symbol) = (@_inline_meta; getfield(x, f, order))
+atomic_setproperty!(x::Tuple, f::Int, v, order::Symbol) = setfield!(x, f, v, order) # to get a decent error
+
+atomic_getproperty(x, f::Symbol, order::Symbol) = (@_inline_meta; getfield(x, f, order))
+atomic_setproperty!(x, f::Symbol, v, order::Symbol) = (@_inline_meta; setfield!(x, f, convert(fieldtype(typeof(x), f), v), order))
+
+#atomic_swapproperty!(x, f::Symbol, v, order::Symbol) = Core.swapfield!(x, f, convert(fieldtype(typeof(x), f), v), order)
+#atomic_modifyproperty!(x, f::Symbol, op, v, order::Symbol) = Core.modifyfield!(x, f, op, v, order)
+#atomic_cmpswapproperty!(x, f::Symbol, cmp, expected, desired, success_order::Symbol, fail_order::Symbol=success_order) =
+#   Core.cmpswapfield!(x, f, cmp, expected, convert(fieldtype(typeof(x), f), desired), success_order, fail_order)
+
 
 include("coreio.jl")
 

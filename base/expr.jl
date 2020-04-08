@@ -442,3 +442,36 @@ macro generated(f)
         error("invalid syntax; @generated must be used with a function definition")
     end
 end
+
+
+"""
+    @atomic ex
+
+Mark `ex` as being performed atomically, if `ex` is a supported expression.
+
+```julia
+mutable struct Atomic{T}; @atomic x::T; end
+a = Atomic(1)
+@atomic a.x = 2 # set field x of a
+@atomic a.x # fetch field x or a
+```
+
+The following forms are also planned, but not yet implemented:
+```
+# @atomic a.x += 1 # increment field x of a
+# @atomic +!(a.x, 1) # increment field x of a
+# @atomic a.x, z = y, a.x # swap field x of a with y and put the old value in z
+```
+"""
+macro atomic(ex)
+    # if !isa(ex, Symbol) && !isexpr(ex, :(::))
+    #     return make_atomic(:sequentially_consistent, ex)
+    # end
+    return esc(Expr(:atomic, ex))
+end
+macro atomic(order, ex)
+    return make_atomic(order, ex)
+end
+function make_atomic(order::Symbol, @nospecialize ex)
+    error("unimplemented jwn")
+end

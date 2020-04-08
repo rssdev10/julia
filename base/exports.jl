@@ -1002,6 +1002,7 @@ export
     @polly,
 
     @assert,
+    @atomic,
     @__dot__,
     @enum,
     @label,

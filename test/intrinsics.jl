@@ -152,3 +152,21 @@ end
     @test_intrinsic Core.Intrinsics.fptosi Int Float16(3.3) 3
     @test_intrinsic Core.Intrinsics.fptoui UInt Float16(3.3) UInt(3)
 end
+
+@test Core.Intrinsics.atomic_fence(:sequentially_consistent) === nothing
+@test Core.Intrinsics.atomic_pointerref(C_NULL, :sequentially_consistent) == nothing
+let r = Ref{Int}(10)
+    p = Base.unsafe_convert(Ptr{Int}, r)
+    GC.@preserve r begin
+        @test Core.Intrinsics.atomic_pointerref(p, :sequentially_consistent) === 10
+        @test Core.Intrinsics.atomic_pointerset(p, 1, :sequentially_consistent) === p
+        @test Core.Intrinsics.atomic_pointerref(p, :sequentially_consistent) === 1
+        @test Core.Intrinsics.atomic_pointercmpswap(p, 100, 1, :sequentially_consistent, :sequentially_consistent) === true
+        @test Core.Intrinsics.atomic_pointerref(p, :sequentially_consistent) === 100
+        @test Core.Intrinsics.atomic_pointercmpswap(p, 1, 1, :sequentially_consistent, :sequentially_consistent) === false
+        @test Core.Intrinsics.atomic_pointerref(p, :sequentially_consistent) === 100
+        @test Core.Intrinsics.atomic_pointermodify(p, +, 1, :sequentially_consistent) == 100
+        @test Core.Intrinsics.atomic_pointermodify(p, +, 1, :sequentially_consistent) == 101
+        @test Core.Intrinsics.atomic_pointerref(p, :sequentially_consistent) == 102
+    end
+end
