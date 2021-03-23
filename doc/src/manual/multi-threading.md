@@ -8,7 +8,7 @@ of Julia multi-threading features.
 By default, Julia starts up with a single thread of execution. This can be verified by using the
 command [`Threads.nthreads()`](@ref):
 
-```julia-repl
+```jldoctest
 julia> Threads.nthreads()
 1
 ```
@@ -37,7 +37,7 @@ julia> Threads.nthreads()
 
 But we are currently on the master thread. To check, we use the function [`Threads.threadid`](@ref)
 
-```julia-repl
+```jldoctest
 julia> Threads.threadid()
 1
 ```
@@ -147,7 +147,7 @@ to its assigned locations:
 
 ```julia-repl
 julia> a
-10-element Array{Float64,1}:
+10-element Vector{Float64}:
  1.0
  1.0
  1.0
@@ -182,14 +182,17 @@ julia> Threads.@threads for id in 1:4
        end
 
 julia> old_is
-4-element Array{Float64,1}:
+4-element Vector{Float64}:
  0.0
  1.0
  7.0
  3.0
 
+julia> i[]
+ 10
+
 julia> ids
-4-element Array{Float64,1}:
+4-element Vector{Float64}:
  1.0
  2.0
  3.0
@@ -227,11 +230,12 @@ julia> acc[]
 1000
 ```
 
-!!! note
-    Not *all* primitive types can be wrapped in an `Atomic` tag. Supported types
-    are `Int8`, `Int16`, `Int32`, `Int64`, `Int128`, `UInt8`, `UInt16`, `UInt32`,
-    `UInt64`, `UInt128`, `Float16`, `Float32`, and `Float64`. Additionally,
-    `Int128` and `UInt128` are not supported on AAarch32 and ppc64le.
+## [Per-field atomics](@id man-atomics)
+
+We can also use atomics on a more granular level using the [`@atomic`](@ref) macro.
+
+TODO: copy information here from Atomics Manifesto at
+https://docs.google.com/document/d/e/2PACX-1vT7Ibthj9WyM8s5bcQbiKsVK6MtvzqmnPFMy-bcjZLlbqv55a0_sTJ99AkbvPIZk3t7MbhZ57NzaIzC/pub
 
 ## Side effects and mutable function arguments
 

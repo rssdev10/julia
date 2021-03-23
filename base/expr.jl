@@ -31,6 +31,9 @@ end
 
 ## expressions ##
 
+isexpr(@nospecialize(ex), head::Symbol) = isa(ex, Expr) && ex.head === head
+isexpr(@nospecialize(ex), head::Symbol, n::Int) = isa(ex, Expr) && ex.head === head && length(ex.args) == n
+
 copy(e::Expr) = exprarray(e.head, copy_exprargs(e.args))
 
 # copy parts of an AST that the compiler mutates
@@ -408,7 +411,7 @@ the global scope or depending on mutable elements.
 See [Metaprogramming](@ref) for further details.
 
 ## Example:
-```julia
+```jldoctest
 julia> @generated function bar(x)
            if x <: Integer
                return :(x ^ 2)
@@ -445,33 +448,99 @@ end
 
 
 """
-    @atomic ex
+    @atomic var
+    @atomic order ex
 
-Mark `ex` as being performed atomically, if `ex` is a supported expression.
+Mark `var` or `ex` as being performed atomically, if `ex` is a supported expression.
 
-```julia
-mutable struct Atomic{T}; @atomic x::T; end
-a = Atomic(1)
-@atomic a.x = 2 # set field x of a
-@atomic a.x # fetch field x or a
+See [atomics](#man-atomics) in the manual for more details.
+
+```jldoctest
+julia> mutable struct Atomic{T}; @atomic x::T; end;
+
+julia> a = Atomic(1);
+
+julia> @atomic a.x = 2 # set field x of a
+2
+
+julia> @atomic a.x # fetch field x or a
+2
+
+julia> @atomic a.x += 1 # increment field x of a
+
+julia> y = 3; @atomic a.x, z = y, a.x # swap field x of a with y and put the old value in z
+(3, 2)
+
+julia> z
+2
+
+julia> y = 4; @atomic a.x, z = y, _ # swap field x of a with y and put the old value in z
+(4, 3)
+
+julia> z
+3
 ```
 
 The following forms are also planned, but not yet implemented:
-```
-# @atomic a.x += 1 # increment field x of a
+```julia
 # @atomic +!(a.x, 1) # increment field x of a
-# @atomic a.x, z = y, a.x # swap field x of a with y and put the old value in z
+# @atomic a.x = +(a.x, 1) # increment field x of a
+# @atomic a.x = +(_, 1) # increment field x of a
 ```
 """
 macro atomic(ex)
-    # if !isa(ex, Symbol) && !isexpr(ex, :(::))
-    #     return make_atomic(:sequentially_consistent, ex)
-    # end
+    if !isa(ex, Symbol) && !is_expr(ex, :(::))
+        return make_atomic(QuoteNode(:sequentially_consistent), ex)
+    end
     return esc(Expr(:atomic, ex))
 end
 macro atomic(order, ex)
     return make_atomic(order, ex)
 end
-function make_atomic(order::Symbol, @nospecialize ex)
-    error("unimplemented jwn")
+function make_atomic(@nospecialize(order), @nospecialize(ex))
+    order isa QuoteNode || (order = esc(order))
+    if ex isa Expr
+        if ex.head === :call
+            error("@atomic atomic_modifyproperty! syntax not implemented")
+        elseif ex.head === :.
+            l, r = esc(ex.args[1]), esc(ex.args[2])
+            return :(atomic_getproperty($l, $r, $order))
+        elseif ex.head === :(=)
+            l, r = ex.args[1], ex.args[2]
+            if is_expr(l, :., 2)
+                ll, lr = esc(l.args[1]), esc(l.args[2])
+                return :(atomic_setproperty!($ll, $lr, $r, $order))
+            elseif is_expr(l, :tuple) && 1 <= length(l.args) <= 2 && is_expr(r, :tuple, 2)
+                atomic = l.args[1]
+                r.args[2] === :_ || r.args[2] == atomic || error("@atomic swap expressions must match or use the literal _")
+                is_expr(atomic, :.) || error("@atomic swap expression missing field access")
+                atomicl, atomicr = esc(atomic.args[1]), esc(atomic.args[2])
+                old = length(l.args) == 1 ? :_ : esc(l.args[2])
+                new = esc(r.args[1])
+                return :(local new = $new; local old = atomic_swapproperty!($atomicl, $atomicr, new, $order); $old = old; (new, old))
+            elseif is_expr(l, :call)
+                length(l.args) == 2 || error("@atomic modify expression has incorrect number of arguments")
+                error("@atomic atomic_modifyproperty! syntax not implemented")
+            end
+        end
+        if length(ex.args) == 2
+            if ex.head === :(+=)
+                op = :+
+            elseif ex.head === :(-=)
+                op = :-
+            elseif @isdefined string
+                shead = string(ex.head)
+                if endswith(shead, '=')
+                    op = Symbol(shead[1:prevind(shead, end)])
+                end
+            end
+            if @isdefined(op)
+                l, r = ex.args[1], esc(ex.args[2])
+                is_expr(l, :.) || error("@atomic modify expression missing field access")
+                ll, lr, op = esc(l.args[1]), esc(l.args[2]), esc(op)
+                return :(local r = $r; local op = $op; op(atomic_modifyproperty!($ll, $lr, op, r, $order), r))
+            end
+        end
+    end
+    error("could not parse @atomic expression $ex")
 end

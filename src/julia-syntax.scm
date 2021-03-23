@@ -1373,7 +1373,7 @@
           (else e)))))
 
 (define (expand-atomic-decl e)
-  (error "unimplemented jwn"))
+  (error "unimplemented or unsupported atomic declaration"))
 
 (define (expand-local-or-global-decl e)
   (if (and (symbol? (cadr e)) (length= e 2))
@@ -4367,7 +4367,7 @@ f(x) = yt(x)
                      (if (not global-const-error)
                          (set! global-const-error current-loc))
                      (emit e))))
-            ((atomic) (error "unimplemented jwn"))
+            ((atomic) (error "misplaced atomic declaration"))
             ((isdefined) (if tail (emit-return e) e))
             ((boundscheck) (if tail (emit-return e) e))
 
