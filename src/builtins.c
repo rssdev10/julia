@@ -833,10 +833,10 @@ enum jl_memory_order jl_get_atomic_order_checked(jl_sym_t *order, char loading, 
 JL_CALLABLE(jl_f_getfield)
 {
     enum jl_memory_order order = jl_memory_order_unspecified;
+    JL_NARGS(getfield, 2, 4);
     if (nargs == 4) {
         JL_TYPECHK(getfield, symbol, args[3]);
         JL_TYPECHK(getfield, bool, args[4]);
-        nargs -= 2;
         order = jl_get_atomic_order_checked((jl_sym_t*)args[3], 1, 0);
     }
     else if (nargs == 3) {
@@ -844,9 +844,7 @@ JL_CALLABLE(jl_f_getfield)
             JL_TYPECHK(getfield, symbol, args[2]);
             order = jl_get_atomic_order_checked((jl_sym_t*)args[2], 1, 0);
         }
-        nargs -= 1;
     }
-    JL_NARGS(getfield, 2, 2);
     jl_value_t *v = args[0];
     jl_value_t *vt = (jl_value_t*)jl_typeof(v);
     if (vt == (jl_value_t*)jl_module_type) {
@@ -882,12 +880,11 @@ JL_CALLABLE(jl_f_getfield)
 JL_CALLABLE(jl_f_setfield)
 {
     enum jl_memory_order order = jl_memory_order_notatomic;
+    JL_NARGS(setfield!, 3, 4);
     if (nargs == 4) {
         JL_TYPECHK(getfield, symbol, args[3]);
-        nargs -= 1;
         order = jl_get_atomic_order_checked((jl_sym_t*)args[3], 0, 1);
     }
-    JL_NARGS(setfield!, 3, 3);
     jl_value_t *v = args[0];
     jl_datatype_t *st = (jl_datatype_t*)jl_typeof(v);
     assert(jl_is_datatype(st));
@@ -914,10 +911,62 @@ JL_CALLABLE(jl_f_setfield)
         jl_atomic_error(isatomic ? "setfield!: atomic field cannot be written non-atomically"
                                  : "setfield!: non-atomic field cannot be written atomically");
     if (order >= jl_memory_order_acq_rel || order == jl_memory_order_release)
-        jl_fence(); // `st->[idx]` will be have at least relaxed ordering
+        jl_fence(); // `st->[idx]` will have at least relaxed ordering
     set_nth_field(st, v, idx, args[2], isatomic);
     return args[2];
 }
+
+JL_CALLABLE(jl_f_swapfield)
+{
+    enum jl_memory_order order = jl_memory_order_notatomic;
+    JL_NARGS(swapfield!, 3, 4);
+    if (nargs == 4) {
+        JL_TYPECHK(getfield, symbol, args[3]);
+        order = jl_get_atomic_order_checked((jl_sym_t*)args[3], 1, 1);
+    }
+    jl_value_t *v = args[0];
+    jl_datatype_t *st = (jl_datatype_t*)jl_typeof(v);
+    assert(jl_is_datatype(st));
+    if (st == jl_module_type)
+        jl_error("cannot assign variables in other modules");
+    if (!st->mutabl)
+        jl_errorf("swapfield!: immutable struct of type %s cannot be changed", jl_symbol_name(st->name->name));
+    size_t idx;
+    if (jl_is_long(args[1])) {
+        idx = jl_unbox_long(args[1]) - 1;
+        if (idx >= jl_datatype_nfields(st))
+            jl_bounds_error(args[0], args[1]);
+    }
+    else {
+        JL_TYPECHK(swapfield!, symbol, args[1]);
+        idx = jl_field_index(st, (jl_sym_t*)args[1], 1);
+    }
+    jl_value_t *ft = jl_field_type_concrete(st, idx);
+    if (!jl_isa(args[2], ft)) {
+        jl_type_error("swapfield!", ft, args[2]);
+    }
+    int isatomic = !!jl_field_isatomic(st, idx);
+    if (isatomic == (order == jl_memory_order_notatomic))
+        jl_atomic_error(isatomic ? "swapfield!: atomic field cannot be written non-atomically"
+                                 : "swapfield!: non-atomic field cannot be written atomically");
+    if (order >= jl_memory_order_acq_rel || order == jl_memory_order_release)
+        jl_fence(); // `st->[idx]` will have at least relaxed ordering
+    v = swap_nth_field(st, v, idx, args[2], isatomic);
+    if (order >= jl_memory_order_acq_rel || order == jl_memory_order_acquire)
+        jl_fence(); // `v` already had at least consume ordering
+    return v;
+}
+
+JL_CALLABLE(jl_f_modifyfield)
+{
+    jl_error("unimplemented");
+}
+
+JL_CALLABLE(jl_f_cmpswapfield)
+{
+    jl_error("unimplemented");
+}
+
 
 static jl_value_t *get_fieldtype(jl_value_t *t, jl_value_t *f, int dothrow)
 {
@@ -998,11 +1047,10 @@ static jl_value_t *get_fieldtype(jl_value_t *t, jl_value_t *f, int dothrow)
 
 JL_CALLABLE(jl_f_fieldtype)
 {
+    JL_NARGS(fieldtype, 2, 3);
     if (nargs == 3) {
         JL_TYPECHK(fieldtype, bool, args[2]);
-        nargs -= 1;
     }
-    JL_NARGS(fieldtype, 2, 2);
     return get_fieldtype(args[0], args[1], 1);
 }
 
@@ -1662,6 +1710,9 @@ void jl_init_primitives(void) JL_GC_DISABLED
     // field access
     jl_builtin_getfield = add_builtin_func("getfield",  jl_f_getfield);
     jl_builtin_setfield = add_builtin_func("setfield!",  jl_f_setfield);
+    jl_builtin_swapfield = add_builtin_func("swapfield!",  jl_f_swapfield);
+    jl_builtin_modifyfield = add_builtin_func("modifyfield!",  jl_f_modifyfield);
+    jl_builtin_cmpswapfield = add_builtin_func("cmpswapfield!",  jl_f_cmpswapfield);
     jl_builtin_fieldtype = add_builtin_func("fieldtype", jl_f_fieldtype);
     jl_builtin_nfields = add_builtin_func("nfields", jl_f_nfields);
     jl_builtin_isdefined = add_builtin_func("isdefined", jl_f_isdefined);

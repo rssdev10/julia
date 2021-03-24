@@ -179,16 +179,17 @@
     XX(jl_expand_with_loc_warn) \
     XX(jl_extern_c) \
     XX(jl_f__abstracttype) \
+    XX(jl_f_applicable) \
     XX(jl_f__apply) \
     XX(jl_f__apply_iterate) \
     XX(jl_f__apply_pure) \
-    XX(jl_f__call_in_world) \
-    XX(jl_f__call_latest) \
-    XX(jl_f_applicable) \
     XX(jl_f_apply_type) \
     XX(jl_f_arrayref) \
     XX(jl_f_arrayset) \
     XX(jl_f_arraysize) \
+    XX(jl_f__call_in_world) \
+    XX(jl_f__call_latest) \
+    XX(jl_f_cmpswapfield) \
     XX(jl_f_const_arrayref) \
     XX(jl_f__equiv_typedef) \
     XX(jl_f__expr) \
@@ -214,6 +215,7 @@
     XX(jl_fl_parse) \
     XX(jl_flush_cstdio) \
     XX(jl_fma_float) \
+    XX(jl_f_modifyfield) \
     XX(jl_f_new_module) \
     XX(jl_f_nfields) \
     XX(jl_forceclose_uv) \
@@ -247,6 +249,7 @@
     XX(jl_f__structtype) \
     XX(jl_fs_unlink) \
     XX(jl_f_svec) \
+    XX(jl_f_swapfield) \
     XX(jl_fs_write) \
     XX(jl_f_throw) \
     XX(jl_ftruncate) \

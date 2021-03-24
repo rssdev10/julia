@@ -331,7 +331,7 @@ static void finalize_object(arraylist_t *list, jl_value_t *o,
         // The `memset` (like any other content mutation) has to be done
         // **before** the `cmpxchg` which publishes the length.
         memset(&items[len], 0, (oldlen - len) * sizeof(void*));
-        jl_atomic_compare_exchange(&list->len, oldlen, len);
+        jl_atomic_cmpswap(&list->len, &oldlen, len);
     }
     else {
         list->len = len;

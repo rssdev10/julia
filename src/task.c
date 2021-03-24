@@ -500,10 +500,11 @@ JL_DLLEXPORT void jl_switch(void)
         jl_error("task switch not allowed from inside staged nor pure functions");
     if (t->sticky && jl_atomic_load_acquire(&t->tid) == -1) {
         // manually yielding to a task
-        if (jl_atomic_compare_exchange(&t->tid, -1, ptls->tid) != -1)
+        int16_t tid = -1;
+        if (!jl_atomic_cmpswap(&t->tid, &tid, ptls->tid) && tid != ptls->tid)
             jl_error("cannot switch to task running on another thread");
     }
-    else if (t->tid != ptls->tid) {
+    else if (jl_atomic_load_relaxed(&t->tid) != ptls->tid) {
         jl_error("cannot switch to task running on another thread");
     }
 
