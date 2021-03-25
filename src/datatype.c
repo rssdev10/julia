@@ -1336,7 +1336,7 @@ jl_value_t *modify_nth_field(jl_datatype_t *st, jl_value_t *v, size_t i, jl_valu
             else {
                 if (needlock)
                     jl_lock_value(v);
-                int success = memcmp((char*)v + offs, r, fsz) == 0;
+                int success = memcmp((char*)v + offs, r, fsz) == 0; // TODO: use jl_egal_
                 if (success) {
                     if (isunion) {
                         size_t fsz = jl_field_size(st, i);
@@ -1449,8 +1449,8 @@ jl_value_t *cmpswap_nth_field(jl_datatype_t *st, jl_value_t *v, size_t i, jl_val
             if (needlock)
                 jl_lock_value(v);
             if (success) {
-                memcpy(r, (char*)v + offs, fsz);
-                success = memcmp(r, expected, fsz); // TODO: use jl_egal_
+                memcpy((char*)r, (char*)v + offs, fsz);
+                success = memcmp((char*)r, (char*)expected, fsz) == 0; // TODO: use jl_egal_
             }
             *((uint8_t*)r + fsz) = success ? 1 : 0;
             if (success) {

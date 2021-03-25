@@ -145,26 +145,32 @@ test_field_orderings(ARefxy{Union{Nothing,Missing}}(nothing, missing), nothing, 
 test_field_orderings(ARefxy{Union{Nothing,Int}}(nothing, 12345_1), nothing, 12345_1)
 test_field_orderings(Complex{Int128}(10, 30), Complex{Int128}(20, 40))
 
+function add(x::T, y)::T where {T}; x + y; end
 @noinline function _test_field_operators(r)
     r = r[]
-    @test getfield(r, :x, :sequentially_consistent) === 10
-    @test setfield!(r, :x, 1, :sequentially_consistent) === 1
-    @test getfield(r, :x, :sequentially_consistent) === 1
-    @test cmpswapfield!(r, :x, 1, 100, :sequentially_consistent, :sequentially_consistent) === (1, true)
-    @test getfield(r, :x, :sequentially_consistent) === 100
-    @test cmpswapfield!(r, :x, 1, 1, :sequentially_consistent, :sequentially_consistent) === (100, false)
-    @test getfield(r, :x, :sequentially_consistent) === 100
-    @test modifyfield!(r, :x, +, 1, :sequentially_consistent) == 100
-    @test modifyfield!(r, :x, +, 1, :sequentially_consistent) == 101
-    @test getfield(r, :x, :sequentially_consistent) == 102
-
-    #@test swapfield!(r, :x, 1, 1) === (100, false)
+    T = typeof(getfield(r, :x))
+    @test getfield(r, :x, :sequentially_consistent) === T(12345_10)
+    @test setfield!(r, :x, T(12345_1), :sequentially_consistent) === T(12345_1)
+    @test getfield(r, :x, :sequentially_consistent) === T(12345_1)
+    @test cmpswapfield!(r, :x, T(12345_1), T(12345_100), :sequentially_consistent, :sequentially_consistent) === (T(12345_1), true)
+    @test getfield(r, :x, :sequentially_consistent) === T(12345_100)
+    @test cmpswapfield!(r, :x, T(12345_1), T(12345_1), :sequentially_consistent, :sequentially_consistent) === (T(12345_100), false)
+    @test getfield(r, :x, :sequentially_consistent) === T(12345_100)
+    @test modifyfield!(r, :x, add, 1, :sequentially_consistent) === T(12345_100)
+    @test modifyfield!(r, :x, add, 1, :sequentially_consistent) === T(12345_101)
+    @test getfield(r, :x, :sequentially_consistent) === T(12345_102)
+    @test swapfield!(r, :x, T(12345_1), :sequentially_consistent) === T(12345_102)
+    @test getfield(r, :x, :sequentially_consistent) === T(12345_1)
 end
 @noinline function test_field_operators(r)
     _test_field_operators(Ref(copy(r)))
     _test_field_operators(Ref{Any}(copy(r)))
     nothing
 end
-test_field_operators(ARefxy{Int}(10, 20))
+test_field_operators(ARefxy{Int}(12345_10, 12345_20))
 test_field_operators(ARefxy{Any}(12345_10, 12345_20))
-test_field_orderings(ARefxy{Union{Nothing,Int}}(nothing, 12345_1), nothing, 12345_1)
+test_field_operators(ARefxy{Union{Nothing,Int}}(12345_10, nothing))
+test_field_operators(ARefxy{Complex{Int32}}(12345_10, 12345_20))
+test_field_operators(ARefxy{Complex{Int128}}(12345_10, 12345_20))
+
+# TODO: need tests of UndefRefException

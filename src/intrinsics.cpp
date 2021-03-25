@@ -286,6 +286,9 @@ static jl_cgval_t ghostValue(jl_value_t *ty);
 static Value *emit_unboxed_coercion(jl_codectx_t &ctx, Type *to, Value *unboxed)
 {
     Type *ty = unboxed->getType();
+    if (ty == to)
+        return unboxed;
+    assert(to->isIntOrPtrTy() || to->isFloatingPointTy());
     bool frompointer = ty->isPointerTy();
     bool topointer = to->isPointerTy();
     const DataLayout &DL = jl_data_layout;
@@ -305,6 +308,14 @@ static Value *emit_unboxed_coercion(jl_codectx_t &ctx, Type *to, Value *unboxed)
     if (frompointer && topointer) {
         unboxed = emit_bitcast(ctx, unboxed, to);
     }
+    else if (!ty->isIntOrPtrTy() && !ty->isFloatingPointTy()) {
+        const DataLayout &DL = jl_data_layout;
+        unsigned nb = DL.getTypeSizeInBits(ty);
+        assert(nb == DL.getTypeSizeInBits(to));
+        AllocaInst *cast = ctx.builder.CreateAlloca(ty);
+        ctx.builder.CreateStore(unboxed, cast);
+        unboxed = ctx.builder.CreateLoad(to, ctx.builder.CreateBitCast(cast, to->getPointerTo()));
+    }
     else if (frompointer) {
         Type *INTT_to = INTT(to);
         unboxed = ctx.builder.CreatePtrToInt(unboxed, INTT_to);
@@ -317,7 +328,7 @@ static Value *emit_unboxed_coercion(jl_codectx_t &ctx, Type *to, Value *unboxed)
             unboxed = ctx.builder.CreateBitCast(unboxed, INTT_to);
         unboxed = emit_inttoptr(ctx, unboxed, to);
     }
-    else if (ty != to) {
+    else {
         unboxed = ctx.builder.CreateBitCast(unboxed, to);
     }
     return unboxed;
