@@ -1233,8 +1233,10 @@ void set_nth_field(jl_datatype_t *st, jl_value_t *v, size_t i, jl_value_t *rhs, 
 
 jl_value_t *swap_nth_field(jl_datatype_t *st, jl_value_t *v, size_t i, jl_value_t *rhs, int isatomic)
 {
+    jl_value_t *ty = jl_field_type_concrete(st, i);
+    if (!jl_isa(rhs, ty))
+       jl_type_error("swapfield!", ty, rhs);
     size_t offs = jl_field_offset(st, i);
-    assert(rhs);
     jl_value_t *r;
     if (jl_field_isptr(st, i)) {
         if (isatomic)
@@ -1244,7 +1246,6 @@ jl_value_t *swap_nth_field(jl_datatype_t *st, jl_value_t *v, size_t i, jl_value_
         jl_gc_wb(v, rhs);
     }
     else {
-        jl_value_t *ty = jl_field_type_concrete(st, i);
         jl_value_t *rty = jl_typeof(rhs);
         int hasptr;
         int isunion = jl_is_uniontype(ty);
@@ -1288,7 +1289,6 @@ jl_value_t *swap_nth_field(jl_datatype_t *st, jl_value_t *v, size_t i, jl_value_
 
 jl_value_t *modify_nth_field(jl_datatype_t *st, jl_value_t *v, size_t i, jl_value_t *op, jl_value_t *rhs, int isatomic)
 {
-    assert(rhs);
     size_t offs = jl_field_offset(st, i);
     jl_value_t *ty = jl_field_type_concrete(st, i);
     jl_value_t *r = jl_get_nth_field_checked(v, i);
@@ -1300,11 +1300,14 @@ jl_value_t *modify_nth_field(jl_datatype_t *st, jl_value_t *v, size_t i, jl_valu
         args[1] = rhs;
         jl_value_t *y = jl_apply_generic(op, args, 2);
         args[1] = y;
-        if (!jl_isa(y, ty)) {
+        if (!jl_isa(y, ty))
             jl_type_error("modifyfield!", ty, y);
-        }
+        // TODO: if (order >= jl_memory_order_acq_rel || order == jl_memory_order_release)
+        // TODO:     jl_fence(); // `st->[idx]` will have at least relaxed ordering
         if (jl_field_isptr(st, i)) {
             jl_value_t **p = (jl_value_t**)((char*)v + offs);
+            // TODO: this should loop until !jl_egal(r, args[0])
+            // TODO: may need barrier before jl_egal
             if (isatomic ? jl_atomic_cmpswap(p, &r, y) : jl_atomic_cmpswap_relaxed(p, &r, y))
                 break;
         }
@@ -1347,16 +1350,15 @@ jl_value_t *modify_nth_field(jl_datatype_t *st, jl_value_t *v, size_t i, jl_valu
                             if (!jl_find_union_component(ty, yty, &nth))
                                 assert(0 && "invalid field assignment to isbits union");
                             *psel = nth;
-                            if (jl_is_datatype_singleton((jl_datatype_t*)rty))
+                            if (jl_is_datatype_singleton((jl_datatype_t*)yty))
                                 break;
                         }
                     }
                     fsz = jl_datatype_size((jl_datatype_t*)yty); // need to shrink-wrap the final copy
                     memassign_safe(hasptr, v, (char*)v + offs, y, fsz);
                 }
-                if (!success) {
+                if (!success)
                     r = jl_new_bits(ty, (char*)v + offs);
-                }
                 if (needlock)
                     jl_unlock_value(v);
                 if (success)
@@ -1367,10 +1369,114 @@ jl_value_t *modify_nth_field(jl_datatype_t *st, jl_value_t *v, size_t i, jl_valu
         jl_gc_safepoint();
     }
     JL_GC_POP();
+    //if (order >= jl_memory_order_acq_rel || order == jl_memory_order_acquire)
+    //    jl_fence(); // `v` already had at least consume ordering
     return r;
 }
 
-jl_value_t *cmpswap_nth_field(jl_datatype_t *st, jl_value_t *v, size_t i, jl_value_t *cmp, jl_value_t *expected, jl_value_t *rhs, int isatomic);
+jl_value_t *cmpswap_nth_field(jl_datatype_t *st, jl_value_t *v, size_t i, jl_value_t *expected, jl_value_t *rhs, int isatomic)
+{
+    jl_value_t *ty = jl_field_type_concrete(st, i);
+    if (!jl_isa(rhs, ty))
+        jl_type_error("cmpswapfield!", ty, rhs);
+    size_t offs = jl_field_offset(st, i);
+    jl_value_t *r = expected;
+    // TODO: if (order >= jl_memory_order_acq_rel || order == jl_memory_order_release)
+    // TODO:     jl_fence(); // `st->[idx]` will have at least relaxed ordering
+    if (jl_field_isptr(st, i)) {
+        jl_value_t **p = (jl_value_t**)((char*)v + offs);
+        int success;
+        while (1) {
+            success = isatomic ? jl_atomic_cmpswap(p, &r, rhs) : jl_atomic_cmpswap_relaxed(p, &r, rhs);
+            if (success)
+                jl_gc_wb(v, rhs);
+            if (__unlikely(r == NULL))
+                jl_throw(jl_undefref_exception);
+            if (success || !jl_egal(r, expected)) // TODO: may need barrier before jl_egal
+                break;
+        }
+        jl_value_t **args;
+        JL_GC_PUSHARGS(args, 2);
+        args[0] = r;
+        args[1] = success ? jl_true : jl_false;
+        r = jl_f_tuple(NULL, args, 2);
+        JL_GC_POP();
+    }
+    else {
+        jl_value_t *rty = jl_typeof(r);
+        int hasptr;
+        int isunion = jl_is_uniontype(ty);
+        if (isunion) {
+            assert(!isatomic);
+            hasptr = 0;
+        }
+        else {
+            hasptr = ((jl_datatype_t*)ty)->layout->npointers > 0;
+        }
+        size_t fsz = jl_datatype_size((jl_datatype_t*)rty); // need to shrink-wrap the final copy
+        int needlock = (isatomic && fsz > MAX_ATOMIC_SIZE);
+        if (isatomic && !needlock) {
+            r = jl_atomic_cmpswap_bits(rty, (char*)v + offs, r, rhs, fsz);
+            int success = *((uint8_t*)r + fsz);
+            if (success && hasptr)
+                jl_gc_multi_wb(v, rhs); // rhs is immutable
+        }
+        else {
+            uint8_t *psel;
+            unsigned nth;
+            int success;
+            if (isunion) {
+                size_t fsz = jl_field_size(st, i);
+                psel = &((uint8_t*)v)[offs + fsz - 1];
+                nth = 0;
+                success = jl_find_union_component(ty, rty, &nth);
+                uint8_t sel = *psel;
+                if (success)
+                    success = nth == sel;
+                rty = jl_nth_union_component(ty, sel);
+            }
+            else {
+                success = rty == ty;
+            }
+            jl_value_t *params[2];
+            params[0] = rty;
+            params[1] = (jl_value_t*)jl_bool_type;
+            jl_datatype_t *tuptyp = jl_apply_tuple_type_v(params, 2);
+            JL_GC_PROMISE_ROOTED(tuptyp); // (JL_ALWAYS_LEAFTYPE)
+            assert(!jl_field_isptr(tuptyp, 0));
+            jl_ptls_t ptls = jl_get_ptls_states();
+            r = jl_gc_alloc(ptls, tuptyp->size, (jl_value_t*)tuptyp);
+            if (needlock)
+                jl_lock_value(v);
+            if (success) {
+                memcpy(r, (char*)v + offs, fsz);
+                success = memcmp(r, expected, fsz); // TODO: use jl_egal_
+            }
+            *((uint8_t*)r + fsz) = success ? 1 : 0;
+            if (success) {
+                rty = jl_typeof(rhs);
+                fsz = jl_datatype_size((jl_datatype_t*)rty); // need to shrink-wrap the final copy
+                if (isunion) {
+                    nth = 0;
+                    if (!jl_find_union_component(ty, rty, &nth))
+                        assert(0 && "invalid field assignment to isbits union");
+                    *psel = nth;
+                    if (jl_is_datatype_singleton((jl_datatype_t*)rty))
+                        return r;
+                }
+                memassign_safe(hasptr, v, (char*)v + offs, rhs, fsz);
+            }
+            if (needlock)
+                jl_unlock_value(v);
+        }
+        r = undefref_check((jl_datatype_t*)ty, r);
+        if (__unlikely(r == NULL))
+            jl_throw(jl_undefref_exception);
+    }
+    //if (order >= jl_memory_order_acq_rel || order == jl_memory_order_acquire)
+    //    jl_fence(); // `v` already had at least consume ordering
+    return r;
+}
 
 JL_DLLEXPORT int jl_field_isdefined(jl_value_t *v, size_t i) JL_NOTSAFEPOINT
 {

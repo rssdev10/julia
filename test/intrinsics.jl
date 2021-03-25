@@ -161,7 +161,7 @@ let r = Ref{Int}(10)
         @test Core.Intrinsics.atomic_pointerref(p, :sequentially_consistent) === 10
         @test Core.Intrinsics.atomic_pointerset(p, 1, :sequentially_consistent) === p
         @test Core.Intrinsics.atomic_pointerref(p, :sequentially_consistent) === 1
-        @test Core.Intrinsics.atomic_pointercmpswap(p, 100, 1, :sequentially_consistent, :sequentially_consistent) === (1, true)
+        @test Core.Intrinsics.atomic_pointercmpswap(p, 1, 100, :sequentially_consistent, :sequentially_consistent) === (1, true)
         @test Core.Intrinsics.atomic_pointerref(p, :sequentially_consistent) === 100
         @test Core.Intrinsics.atomic_pointercmpswap(p, 1, 1, :sequentially_consistent, :sequentially_consistent) === (100, false)
         @test Core.Intrinsics.atomic_pointerref(p, :sequentially_consistent) === 100

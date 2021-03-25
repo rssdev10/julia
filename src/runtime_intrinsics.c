@@ -178,6 +178,7 @@ JL_DLLEXPORT jl_value_t *jl_atomic_swap_bits(jl_value_t *dt, char *dst, const jl
 JL_DLLEXPORT int jl_atomic_bool_cmpswap_bits(char *dst, const jl_value_t *expected, const jl_value_t *src, int nb)
 {
     // dst must have the required alignment for an atomic of the given size
+    // TODO: this can spuriously fail if there are padding bits, the caller should deal with that
     int success;
     switch (nb) {
     case  1: {
@@ -219,6 +220,7 @@ JL_DLLEXPORT int jl_atomic_bool_cmpswap_bits(char *dst, const jl_value_t *expect
 JL_DLLEXPORT jl_value_t *jl_atomic_cmpswap_bits(jl_value_t *dt, char *dst, const jl_value_t *expected, const jl_value_t *src, int nb)
 {
     // dst must have the required alignment for an atomic of the given size
+    // TODO: this can spuriously fail if there are padding bits, the caller should deal with that
     jl_value_t *params[2];
     params[0] = dt;
     params[1] = (jl_value_t*)jl_bool_type;
@@ -361,6 +363,8 @@ JL_DLLEXPORT jl_value_t *jl_atomic_pointermodify(jl_value_t *p, jl_value_t *f, j
         jl_value_t *y = jl_apply_generic(f, args, 2);
         args[1] = y;
         if (ety == (jl_value_t*)jl_any_type) {
+            // TODO: this should loop, not just check once
+            // TODO: may need barrier before jl_egal
             if (jl_atomic_cmpswap((jl_value_t**)pp, &expected, y))
                 break;
         }
@@ -379,7 +383,7 @@ JL_DLLEXPORT jl_value_t *jl_atomic_pointermodify(jl_value_t *p, jl_value_t *f, j
     return expected;
 }
 
-JL_DLLEXPORT jl_value_t *jl_atomic_pointercmpswap(jl_value_t *p, jl_value_t *x, jl_value_t *expected, jl_value_t *success_order_sym, jl_value_t *failure_order_sym)
+JL_DLLEXPORT jl_value_t *jl_atomic_pointercmpswap(jl_value_t *p, jl_value_t *expected, jl_value_t *x, jl_value_t *success_order_sym, jl_value_t *failure_order_sym)
 {
     JL_TYPECHK(pointercmpswap, pointer, p);
     JL_TYPECHK(pointercmpswap, symbol, success_order_sym);
@@ -387,15 +391,18 @@ JL_DLLEXPORT jl_value_t *jl_atomic_pointercmpswap(jl_value_t *p, jl_value_t *x, 
     enum jl_memory_order success_order = jl_get_atomic_order_checked((jl_sym_t*)success_order_sym, 1, 1);
     enum jl_memory_order failure_order = jl_get_atomic_order_checked((jl_sym_t*)failure_order_sym, 1, 0);
     if (failure_order > success_order)
-        jl_atomic_error("invalid atomic ordering");
+        jl_atomic_error("pointercmpswap: invalid atomic ordering");
+    // TODO: filter invalid orderings
     jl_value_t *ety = jl_tparam0(jl_typeof(p));
     char *pp = (char*)jl_unbox_long(p);
     if (ety == (jl_value_t*)jl_any_type) {
         jl_value_t **result;
         JL_GC_PUSHARGS(result, 2);
         result[0] = expected;
+        // TODO: this should loop, not just check once
         int success = jl_atomic_cmpswap((jl_value_t**)pp, &result[0], x);
-        if (!success && expected != result[0] && jl_egal(expected, result[0])) {
+        // TODO: may need barrier before jl_egal
+        if (!success && jl_egal(expected, result[0])) {
              success = jl_atomic_cmpswap((jl_value_t**)pp, &result[0], x);
         }
         result[1] = success ? jl_true : jl_false;

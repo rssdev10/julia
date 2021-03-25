@@ -135,26 +135,36 @@ end
 end
 @noinline test_field_orderings(x, y) = (@nospecialize; test_field_orderings(ARefxy(x, y), x, y))
 test_field_orderings(10, 20)
+test_field_orderings(true, false)
 test_field_orderings("hi", "bye")
 test_field_orderings(:hi, :bye)
 test_field_orderings(nothing, nothing)
+test_field_orderings(ARefxy{Any}(12345_10, 12345_20), 12345_10, 12345_20)
+test_field_orderings(ARefxy{Any}(true, false), true, false)
 test_field_orderings(ARefxy{Union{Nothing,Missing}}(nothing, missing), nothing, missing)
-test_field_orderings(ARefxy{Union{Nothing,Int}}(nothing, 1), nothing, 1)
+test_field_orderings(ARefxy{Union{Nothing,Int}}(nothing, 12345_1), nothing, 12345_1)
 test_field_orderings(Complex{Int128}(10, 30), Complex{Int128}(20, 40))
 
-@noinline function test_field_operators(r)
+@noinline function _test_field_operators(r)
     r = r[]
     @test getfield(r, :x, :sequentially_consistent) === 10
     @test setfield!(r, :x, 1, :sequentially_consistent) === 1
     @test getfield(r, :x, :sequentially_consistent) === 1
-    #@test cmpswap(r, :x, :sequentially_consistent) === 1
-    #@test atomics_pointercmpswap(r, 100, 1, :sequentially_consistent, :sequentially_consistent) === true
-    #@test atomics_pointerref(r, :sequentially_consistent) === 100
-    #@test atomics_pointercmpswap(r, 1, 1, :sequentially_consistent, :sequentially_consistent) === false
-    #@test atomics_pointerref(r, :sequentially_consistent) === 100
-    #@test atomics_pointermodify(r, +, 1 :sequentially_consistent) == 100
-    #@test atomics_pointermodify(r, +, 1, :sequentially_consistent) == 101
-    #@test atomics_pointerref(r, :sequentially_consistent) == 102
+    @test cmpswapfield!(r, :x, 1, 100, :sequentially_consistent, :sequentially_consistent) === (1, true)
+    @test getfield(r, :x, :sequentially_consistent) === 100
+    @test cmpswapfield!(r, :x, 1, 1, :sequentially_consistent, :sequentially_consistent) === (100, false)
+    @test getfield(r, :x, :sequentially_consistent) === 100
+    @test modifyfield!(r, :x, +, 1, :sequentially_consistent) == 100
+    @test modifyfield!(r, :x, +, 1, :sequentially_consistent) == 101
+    @test getfield(r, :x, :sequentially_consistent) == 102
+
+    #@test swapfield!(r, :x, 1, 1) === (100, false)
 end
-test_field_operators(Ref(ARefxy{Int}(10, 20)))
-test_field_operators(Ref{Any}(ARefxy{Int}(10, 20)))
+@noinline function test_field_operators(r)
+    _test_field_operators(Ref(copy(r)))
+    _test_field_operators(Ref{Any}(copy(r)))
+    nothing
+end
+test_field_operators(ARefxy{Int}(10, 20))
+test_field_operators(ARefxy{Any}(12345_10, 12345_20))
+test_field_orderings(ARefxy{Union{Nothing,Int}}(nothing, 12345_1), nothing, 12345_1)

@@ -1885,35 +1885,35 @@ ERROR: setfield!: immutable struct of type Rational cannot be changed
 """
 setfield!
 
-#"""
-#    Core.swapfield!(value, name::Symbol, x, [order::Symbol])
-#    Core.swapfield!(value, i::Int, x, [order::Symbol])
-#
-#These atomically perform the operations to simultaneously get and set a field:
-#
-#    y = getfield!(value, name)
-#    setfield!(value, name, x)
-#    return y
-#```
-#"""
-#Core.swapfield!
-#
-#"""
-#    Core.modifyfield!(value, name::Symbol, op, x, [order::Symbol])
-#    Core.modifyfield!(value, i::Int, op, x, [order::Symbol])
-#
-#These atomically perform the operations to get and set a field after applying
-#the function `op`.
-#
-#    y = getfield!(value, name)
-#    setfield!(value, name, op(y, x))
-#    return y
-#
-#If supported by the hardware (for example, atomic increment), we'll optimize
-#this to the appropriate hardware instruction, otherwise it'll use a loop.
-#"""
-#Core.modifyfield!
-#
+"""
+    swapfield!(value, name::Symbol, x, [order::Symbol])
+    swapfield!(value, i::Int, x, [order::Symbol])
+
+These atomically perform the operations to simultaneously get and set a field:
+
+    y = getfield!(value, name)
+    setfield!(value, name, x)
+    return y
+```
+"""
+swapfield!
+
+"""
+    modifyfield!(value, name::Symbol, op, x, [order::Symbol])
+    modifyfield!(value, i::Int, op, x, [order::Symbol])
+
+These atomically perform the operations to get and set a field after applying
+the function `op`.
+
+    y = getfield!(value, name)
+    setfield!(value, name, op(y, x))
+    return y
+
+If supported by the hardware (for example, atomic increment), this may be
+optimized to the appropriate hardware instruction, otherwise it'll use a loop.
+"""
+modifyfield!
+
 #"""
 #    Core.cmpswapfield!(value, name::Symbol, cmp, expected, desired,
 #        [success_order::Symbol, [fail_order::Symbol=success_order]) =>
