@@ -38,9 +38,13 @@
 #endif
 
 // define the largest size (bytes) of a properly aligned object that the
-// processor family can always support without a lock
+// processor family typically supports without a lock
 // (assumed to be at least a pointer size)
+#ifdef _P64
+#define MAX_ATOMIC_SIZE 16
+#else
 #define MAX_ATOMIC_SIZE 8
+#endif
 
 #ifdef _P64
 #define NWORDS(sz) (((sz)+7)>>3)

@@ -104,13 +104,8 @@ JL_DLLEXPORT jl_value_t *jl_atomic_new_bits(jl_value_t *dt, const char *data)
     case  1: *(uint8_t*) v = jl_atomic_load((uint8_t*)data);    break;
     case  2: *(uint16_t*)v = jl_atomic_load((uint16_t*)data);   break;
     case  4: *(uint32_t*)v = jl_atomic_load((uint32_t*)data);   break;
-#if MAX_ATOMIC_SIZE > 4
     case  8: *(uint64_t*)v = jl_atomic_load((uint64_t*)data);   break;
-#elif MAX_ATOMIC_SIZE > 8
     case 16: *(uint128_t*)v = *(_Atomic uint128_t*)data;        break;
-#else
-#error MAX_ATOMIC_SIZE too large
-#endif
     default:
         abort();
     }
@@ -126,13 +121,8 @@ JL_DLLEXPORT void jl_atomic_store_bits(char *dst, const jl_value_t *src, int nb)
     case  1: jl_atomic_store((uint8_t*)dst, *(uint8_t*)src);   break;
     case  2: jl_atomic_store((uint16_t*)dst, *(uint16_t*)src); break;
     case  4: jl_atomic_store((uint32_t*)dst, *(uint32_t*)src); break;
-#if MAX_ATOMIC_SIZE > 4
     case  8: jl_atomic_store((uint64_t*)dst, *(uint64_t*)src); break;
-#elif MAX_ATOMIC_SIZE > 8
     case 16: *(_Atomic uint128_t*)dst = *(uint128_t*)src;      break;
-#else
-#error MAX_ATOMIC_SIZE too large
-#endif
     default:
         abort();
     }
@@ -162,13 +152,8 @@ JL_DLLEXPORT jl_value_t *jl_atomic_swap_bits(jl_value_t *dt, char *dst, const jl
     case  1: *(uint8_t*) v = jl_atomic_exchange((uint8_t*)dst, *(uint8_t*)src);    break;
     case  2: *(uint16_t*)v = jl_atomic_exchange((uint16_t*)dst, *(uint16_t*)src);   break;
     case  4: *(uint32_t*)v = jl_atomic_exchange((uint32_t*)dst, *(uint32_t*)src);   break;
-#if MAX_ATOMIC_SIZE > 4
     case  8: *(uint64_t*)v = jl_atomic_exchange((uint64_t*)dst, *(uint64_t*)src);   break;
-#elif MAX_ATOMIC_SIZE > 8
     case 16: *(uint128_t*)v = jl_atomic_exchange((uint128_t*)dst, *(uint128_t*)src);   break;
-#else
-#error MAX_ATOMIC_SIZE too large
-#endif
     default:
         abort();
     }
@@ -196,21 +181,16 @@ JL_DLLEXPORT int jl_atomic_bool_cmpswap_bits(char *dst, const jl_value_t *expect
         success = jl_atomic_cmpswap((uint32_t*)dst, &y, *(uint32_t*)src);
         break;
     }
-#if MAX_ATOMIC_SIZE > 4
     case  8: {
         uint64_t y = *(uint64_t*)expected;
         success = jl_atomic_cmpswap((uint64_t*)dst, &y, *(uint64_t*)src);
         break;
     }
-#elif MAX_ATOMIC_SIZE > 8
     case 16: {
         uint128_t y = *(uint128_t*)expected;
         success = jl_atomic_cmpswap((uint128_t*)dst, &y, *(uint128_t*)src);
         break;
     }
-#else
-#error MAX_ATOMIC_SIZE too large
-#endif
     default:
         abort();
     }
@@ -249,23 +229,18 @@ JL_DLLEXPORT jl_value_t *jl_atomic_cmpswap_bits(jl_value_t *dt, char *dst, const
         success = jl_atomic_cmpswap((uint32_t*)dst, y32, *(uint32_t*)src);
         break;
     }
-#if MAX_ATOMIC_SIZE > 4
     case  8: {
         uint64_t *y64 = (uint64_t*)y;
         *y64 = *(uint64_t*)expected;
         success = jl_atomic_cmpswap((uint64_t*)dst, y64, *(uint64_t*)src);
         break;
     }
-#elif MAX_ATOMIC_SIZE > 8
     case 64: {
         uint128_t *y128 = (uint128_t*)y;
         *y128 = *(uint128_t*)expected;
         success = jl_atomic_cmpswap((uint128_t*)dst, y128, *(uint128_t*)src);
         break;
     }
-#else
-#error MAX_ATOMIC_SIZE too large
-#endif
     default:
         abort();
     }
@@ -281,6 +256,11 @@ JL_DLLEXPORT jl_value_t *jl_atomic_cmpswap_bits(jl_value_t *dt, char *dst, const
     return y;
 }
 
+#define MAX_POINTERATOMIC_SIZE 16
+#if MAX_ATOMIC_SIZE > MAX_POINTERATOMIC_SIZE
+#error MAX_ATOMIC_SIZE too large
+#endif
+
 JL_DLLEXPORT jl_value_t *jl_atomic_pointerref(jl_value_t *p, jl_value_t *order)
 {
     JL_TYPECHK(pointerref, pointer, p);
@@ -295,7 +275,7 @@ JL_DLLEXPORT jl_value_t *jl_atomic_pointerref(jl_value_t *p, jl_value_t *order)
         if (!jl_is_datatype(ety))
             jl_error("pointerref: invalid pointer");
         size_t nb = jl_datatype_size(ety);
-        if ((nb & (nb - 1)) != 0 || nb > MAX_ATOMIC_SIZE)
+        if ((nb & (nb - 1)) != 0 || nb > MAX_POINTERATOMIC_SIZE)
             jl_error("pointerref: invalid atomic operation");
         return jl_atomic_new_bits(ety, pp);
     }
@@ -317,7 +297,7 @@ JL_DLLEXPORT jl_value_t *jl_atomic_pointerset(jl_value_t *p, jl_value_t *x, jl_v
         if (jl_typeof(x) != ety)
             jl_type_error("pointerset", ety, x);
         size_t nb = jl_datatype_size(ety);
-        if ((nb & (nb - 1)) != 0 || nb > MAX_ATOMIC_SIZE)
+        if ((nb & (nb - 1)) != 0 || nb > MAX_POINTERATOMIC_SIZE)
             jl_error("pointerset: invalid atomic operation");
         jl_atomic_store_bits(pp, x, nb);
     }
@@ -341,7 +321,7 @@ JL_DLLEXPORT jl_value_t *jl_atomic_pointerswap(jl_value_t *p, jl_value_t *x, jl_
         if (jl_typeof(x) != ety)
             jl_type_error("pointerswap", ety, x);
         size_t nb = jl_datatype_size(ety);
-        if ((nb & (nb - 1)) != 0 || nb > MAX_ATOMIC_SIZE)
+        if ((nb & (nb - 1)) != 0 || nb > MAX_POINTERATOMIC_SIZE)
             jl_error("pointerswap: invalid atomic operation");
         y = jl_atomic_swap_bits(ety, pp, x, nb);
     }
@@ -416,7 +396,7 @@ JL_DLLEXPORT jl_value_t *jl_atomic_pointercmpswap(jl_value_t *p, jl_value_t *exp
         if (jl_typeof(x) != ety || jl_typeof(expected) != ety)
             jl_type_error("pointercmpswap", ety, x);
         size_t nb = jl_datatype_size(ety);
-        if ((nb & (nb - 1)) != 0 || nb > MAX_ATOMIC_SIZE)
+        if ((nb & (nb - 1)) != 0 || nb > MAX_POINTERATOMIC_SIZE)
             jl_error("pointercmpswap: invalid atomic operation");
         return jl_atomic_cmpswap_bits(ety, pp, expected, x, nb);
     }
