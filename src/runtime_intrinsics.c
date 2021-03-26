@@ -40,7 +40,7 @@ JL_DLLEXPORT jl_value_t *jl_pointerref(jl_value_t *p, jl_value_t *i, jl_value_t 
     jl_value_t *ety = jl_tparam0(jl_typeof(p));
     if (ety == (jl_value_t*)jl_any_type) {
         jl_value_t **pp = (jl_value_t**)(jl_unbox_long(p) + (jl_unbox_long(i)-1)*sizeof(void*));
-        return *pp;
+        return *pp; // TODO: change alignment assumption?
     }
     else {
         if (!jl_is_datatype(ety))
@@ -60,7 +60,7 @@ JL_DLLEXPORT jl_value_t *jl_pointerset(jl_value_t *p, jl_value_t *x, jl_value_t 
     jl_value_t *ety = jl_tparam0(jl_typeof(p));
     if (ety == (jl_value_t*)jl_any_type) {
         jl_value_t **pp = (jl_value_t**)(jl_unbox_long(p) + (jl_unbox_long(i)-1)*sizeof(void*));
-        *pp = x;
+        *pp = x; // TODO: change alignment assumption?
     }
     else {
         if (!jl_is_datatype(ety))
@@ -192,7 +192,7 @@ JL_DLLEXPORT jl_value_t *jl_atomic_swap_bits(jl_value_t *dt, char *dst, const jl
 JL_DLLEXPORT int jl_atomic_bool_cmpswap_bits(char *dst, const jl_value_t *expected, const jl_value_t *src, int nb)
 {
     // dst must have the required alignment for an atomic of the given size
-    // TODO: this can spuriously fail if there are padding bits, the caller should deal with that
+    // n.b.: this can spuriously fail if there are padding bits, the caller should deal with that
     int success;
     switch (nb) {
     case  1: {
@@ -232,18 +232,18 @@ JL_DLLEXPORT int jl_atomic_bool_cmpswap_bits(char *dst, const jl_value_t *expect
     return success;
 }
 
-JL_DLLEXPORT jl_value_t *jl_atomic_cmpswap_bits(jl_value_t *dt, char *dst, const jl_value_t *expected, const jl_value_t *src, int nb)
+JL_DLLEXPORT jl_value_t *jl_atomic_cmpswap_bits(jl_datatype_t *dt, char *dst, const jl_value_t *expected, const jl_value_t *src, int nb)
 {
     // dst must have the required alignment for an atomic of the given size
-    // TODO: this can spuriously fail if there are padding bits, the caller should deal with that
+    // n.b.: this does not spuriously fail if there are padding bits
     jl_value_t *params[2];
-    params[0] = dt;
+    params[0] = (jl_value_t*)dt;
     params[1] = (jl_value_t*)jl_bool_type;
     jl_datatype_t *tuptyp = jl_apply_tuple_type_v(params, 2);
     JL_GC_PROMISE_ROOTED(tuptyp); // (JL_ALWAYS_LEAFTYPE)
     int isptr = jl_field_isptr(tuptyp, 0);
     jl_ptls_t ptls = jl_get_ptls_states();
-    jl_value_t *y = jl_gc_alloc(ptls, isptr ? nb : tuptyp->size, isptr ? dt : (jl_value_t*)tuptyp);
+    jl_value_t *y = jl_gc_alloc(ptls, isptr ? nb : tuptyp->size, isptr ? dt : tuptyp);
     int success;
     switch (nb) {
     case  1: {
@@ -255,20 +255,33 @@ JL_DLLEXPORT jl_value_t *jl_atomic_cmpswap_bits(jl_value_t *dt, char *dst, const
     case  2: {
         uint16_t *y16 = (uint16_t*)y;
         *y16 = *(uint16_t*)expected;
-        success = jl_atomic_cmpswap((uint16_t*)dst, y16, *(uint16_t*)src);
+        while (1) {
+            success = jl_atomic_cmpswap((uint16_t*)dst, y16, *(uint16_t*)src);
+            if (success || !dt->layout->haspadding || !jl_egal__bits(y, expected, dt))
+                break;
+        }
         break;
     }
     case  4: {
         uint32_t *y32 = (uint32_t*)y;
         *y32 = *(uint32_t*)expected;
-        success = jl_atomic_cmpswap((uint32_t*)dst, y32, *(uint32_t*)src);
+        while (1) {
+            success = jl_atomic_cmpswap((uint32_t*)dst, y32, *(uint32_t*)src);
+            if (success || !dt->layout->haspadding || !jl_egal__bits(y, expected, dt))
+                break;
+        }
+        // TODO: while loop
         break;
     }
 #if MAX_POINTERATOMIC_SIZE > 4
     case  8: {
         uint64_t *y64 = (uint64_t*)y;
         *y64 = *(uint64_t*)expected;
-        success = jl_atomic_cmpswap((uint64_t*)dst, y64, *(uint64_t*)src);
+        while (1) {
+            success = jl_atomic_cmpswap((uint64_t*)dst, y64, *(uint64_t*)src);
+            if (success || !dt->layout->haspadding || !jl_egal__bits(y, expected, dt))
+                break;
+        }
         break;
     }
 #endif
@@ -276,7 +289,11 @@ JL_DLLEXPORT jl_value_t *jl_atomic_cmpswap_bits(jl_value_t *dt, char *dst, const
     case 16: {
         uint128_t *y128 = (uint128_t*)y;
         *y128 = *(uint128_t*)expected;
-        success = jl_atomic_cmpswap((uint128_t*)dst, y128, *(uint128_t*)src);
+        while (1) {
+            success = jl_atomic_cmpswap((uint128_t*)dst, y128, *(uint128_t*)src);
+            if (success || !dt->layout->haspadding || !jl_egal__bits(y, expected, dt))
+                break;
+        }
         break;
     }
 #else
@@ -375,12 +392,11 @@ JL_DLLEXPORT jl_value_t *jl_atomic_pointermodify(jl_value_t *p, jl_value_t *f, j
     JL_GC_PUSHARGS(args, 2);
     args[0] = expected;
     while (1) {
+        // TODO: atomic ordering fence required here if hasptr?
         args[1] = x;
         jl_value_t *y = jl_apply_generic(f, args, 2);
         args[1] = y;
         if (ety == (jl_value_t*)jl_any_type) {
-            // TODO: this should loop, not just check once
-            // TODO: may need barrier before jl_egal
             if (jl_atomic_cmpswap((jl_value_t**)pp, &expected, y))
                 break;
         }
@@ -415,11 +431,12 @@ JL_DLLEXPORT jl_value_t *jl_atomic_pointercmpswap(jl_value_t *p, jl_value_t *exp
         jl_value_t **result;
         JL_GC_PUSHARGS(result, 2);
         result[0] = expected;
-        // TODO: this should loop, not just check once
-        int success = jl_atomic_cmpswap((jl_value_t**)pp, &result[0], x);
-        // TODO: may need barrier before jl_egal
-        if (!success && jl_egal(expected, result[0])) {
-             success = jl_atomic_cmpswap((jl_value_t**)pp, &result[0], x);
+        int success;
+        while (1) {
+            success = jl_atomic_cmpswap((jl_value_t**)pp, &result[0], x);
+            // TODO: may need barrier before jl_egal
+            if (success || !jl_egal(result[0], expected))
+                break;
         }
         result[1] = success ? jl_true : jl_false;
         result[0] = jl_f_tuple(NULL, result, 2);
@@ -436,7 +453,7 @@ JL_DLLEXPORT jl_value_t *jl_atomic_pointercmpswap(jl_value_t *p, jl_value_t *exp
         size_t nb = jl_datatype_size(ety);
         if ((nb & (nb - 1)) != 0 || nb > MAX_POINTERATOMIC_SIZE)
             jl_error("pointercmpswap: invalid atomic operation");
-        return jl_atomic_cmpswap_bits(ety, pp, expected, x, nb);
+        return jl_atomic_cmpswap_bits((jl_datatype_t*)ety, pp, expected, x, nb);
     }
 }
 

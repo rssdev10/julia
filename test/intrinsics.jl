@@ -162,15 +162,18 @@ primitive type Int512 <: Signed 512 end
 Int512(i::Int) = Core.Intrinsics.sext_int(Int512, i)
 function add(i::T, j)::T where {T}; return i + j; end
 swap(i, j) = j
-for T in (Int8, Int16, Int32, Int64, Int128, Int256, Int512, Complex{Int32}, Complex{Int512})
-    r = Ref{T}(10)
+for TT in (Int8, Int16, Int32, Int64, Int128, Int256, Int512, Complex{Int32}, Complex{Int512}, Any)
+    T(x) = convert(TT, x)
+    r = Ref{TT}(10)
     p = Base.unsafe_convert(Ptr{eltype(r)}, r)
     GC.@preserve r begin
         S = UInt32
-        @test_throws TypeError Core.Intrinsics.atomic_pointerset(p, S(1), :sequentially_consistent)
-        @test_throws TypeError Core.Intrinsics.atomic_pointerswap(p, S(100), :sequentially_consistent)
-        @test_throws TypeError Core.Intrinsics.atomic_pointercmpswap(p, T(100), S(2), :sequentially_consistent, :sequentially_consistent)
-        @test_throws TypeError Core.Intrinsics.atomic_pointercmpswap(p, S(100), T(2), :sequentially_consistent, :sequentially_consistent)
+        if TT !== Any
+            @test_throws TypeError Core.Intrinsics.atomic_pointerset(p, S(1), :sequentially_consistent)
+            @test_throws TypeError Core.Intrinsics.atomic_pointerswap(p, S(100), :sequentially_consistent)
+            @test_throws TypeError Core.Intrinsics.atomic_pointercmpswap(p, T(100), S(2), :sequentially_consistent, :sequentially_consistent)
+            @test_throws TypeError Core.Intrinsics.atomic_pointercmpswap(p, S(100), T(2), :sequentially_consistent, :sequentially_consistent)
+        end
         @test Core.Intrinsics.pointerref(p, 1, 1) === T(10) === r[]
         if sizeof(r) > 2 * sizeof(Int)
             @test_throws ErrorException Core.Intrinsics.atomic_pointerref(p, :sequentially_consistent)
@@ -181,7 +184,7 @@ for T in (Int8, Int16, Int32, Int64, Int128, Int256, Int512, Complex{Int32}, Com
             @test_throws ErrorException Core.Intrinsics.atomic_pointercmpswap(p, T(100), T(2), :sequentially_consistent, :sequentially_consistent)
             @test Core.Intrinsics.pointerref(p, 1, 1) === T(10) === r[]
         else
-            @test_throws TypeError Core.Intrinsics.atomic_pointermodify(p, swap, S(1), :sequentially_consistent)
+            TT !== Any && @test_throws TypeError Core.Intrinsics.atomic_pointermodify(p, swap, S(1), :sequentially_consistent)
             @test Core.Intrinsics.atomic_pointerref(p, :sequentially_consistent) === T(10)
             @test Core.Intrinsics.atomic_pointerset(p, T(1), :sequentially_consistent) === p
             @test Core.Intrinsics.atomic_pointerref(p, :sequentially_consistent) === T(1)
@@ -194,6 +197,15 @@ for T in (Int8, Int16, Int32, Int64, Int128, Int256, Int512, Complex{Int32}, Com
             @test Core.Intrinsics.atomic_pointerref(p, :sequentially_consistent) === T(102)
             @test Core.Intrinsics.atomic_pointerswap(p, T(103), :sequentially_consistent) === T(102)
             @test Core.Intrinsics.atomic_pointerref(p, :sequentially_consistent) === T(103)
+        end
+        if TT === Any
+            @test Core.Intrinsics.atomic_pointermodify(p, swap, S(103), :sequentially_consistent) === T(103)
+            @test Core.Intrinsics.atomic_pointerref(p, :sequentially_consistent) === S(103)
+            @test Core.Intrinsics.atomic_pointerset(p, S(1), :sequentially_consistent) === p
+            @test Core.Intrinsics.atomic_pointerswap(p, S(100), :sequentially_consistent) === S(1)
+            @test Core.Intrinsics.atomic_pointercmpswap(p, T(100), S(2), :sequentially_consistent, :sequentially_consistent) === (S(100), false)
+            @test Core.Intrinsics.atomic_pointercmpswap(p, S(100), T(2), :sequentially_consistent, :sequentially_consistent) === (S(100), true)
+            @test Core.Intrinsics.atomic_pointerref(p, :sequentially_consistent) === T(2)
         end
     end
 end

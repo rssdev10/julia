@@ -1292,11 +1292,11 @@ jl_value_t *modify_nth_field(jl_datatype_t *st, jl_value_t *v, size_t i, jl_valu
     size_t offs = jl_field_offset(st, i);
     jl_value_t *ty = jl_field_type_concrete(st, i);
     jl_value_t *r = jl_get_nth_field_checked(v, i);
-    // TODO: atomic ordering fence REQUIRED here
     jl_value_t **args;
     JL_GC_PUSHARGS(args, 2);
     args[0] = r;
     while (1) {
+        // TODO: atomic ordering fence required here if hasptr?
         args[1] = rhs;
         jl_value_t *y = jl_apply_generic(op, args, 2);
         args[1] = y;
@@ -1306,8 +1306,6 @@ jl_value_t *modify_nth_field(jl_datatype_t *st, jl_value_t *v, size_t i, jl_valu
         // TODO:     jl_fence(); // `st->[idx]` will have at least relaxed ordering
         if (jl_field_isptr(st, i)) {
             jl_value_t **p = (jl_value_t**)((char*)v + offs);
-            // TODO: this should loop until !jl_egal(r, args[0])
-            // TODO: may need barrier before jl_egal
             if (isatomic ? jl_atomic_cmpswap(p, &r, y) : jl_atomic_cmpswap_relaxed(p, &r, y))
                 break;
         }
@@ -1336,7 +1334,7 @@ jl_value_t *modify_nth_field(jl_datatype_t *st, jl_value_t *v, size_t i, jl_valu
             else {
                 if (needlock)
                     jl_lock_value(v);
-                int success = memcmp((char*)v + offs, r, fsz) == 0; // TODO: use jl_egal_
+                int success = memcmp((char*)v + offs, r, fsz) == 0;
                 if (success) {
                     if (isunion) {
                         size_t fsz = jl_field_size(st, i);
@@ -1416,7 +1414,7 @@ jl_value_t *cmpswap_nth_field(jl_datatype_t *st, jl_value_t *v, size_t i, jl_val
         size_t fsz = jl_datatype_size((jl_datatype_t*)rty); // need to shrink-wrap the final copy
         int needlock = (isatomic && fsz > MAX_ATOMIC_SIZE);
         if (isatomic && !needlock) {
-            r = jl_atomic_cmpswap_bits(rty, (char*)v + offs, r, rhs, fsz);
+            r = jl_atomic_cmpswap_bits((jl_datatype_t*)rty, (char*)v + offs, r, rhs, fsz);
             int success = *((uint8_t*)r + fsz);
             if (success && hasptr)
                 jl_gc_multi_wb(v, rhs); // rhs is immutable
@@ -1450,7 +1448,10 @@ jl_value_t *cmpswap_nth_field(jl_datatype_t *st, jl_value_t *v, size_t i, jl_val
                 jl_lock_value(v);
             if (success) {
                 memcpy((char*)r, (char*)v + offs, fsz);
-                success = memcmp((char*)r, (char*)expected, fsz) == 0; // TODO: use jl_egal_
+                if (((jl_datatype_t*)rty)->layout->haspadding)
+                    success = jl_egal__bits(r, expected, (jl_datatype_t*)rty);
+                else
+                    success = memcmp((char*)r, (char*)expected, fsz) == 0;
             }
             *((uint8_t*)r + fsz) = success ? 1 : 0;
             if (success) {

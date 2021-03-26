@@ -50,16 +50,9 @@ enum jl_memory_order {
  * are). We also need to access these atomic variables from the LLVM JIT code
  * which is very hard unless the layout of the object is fully specified.
  */
-#if defined(__GNUC__)
-#  define jl_fence() __atomic_thread_fence(__ATOMIC_SEQ_CST)
-#  define jl_fence_release() __atomic_thread_fence(__ATOMIC_RELEASE)
-#  define jl_signal_fence() __atomic_signal_fence(__ATOMIC_SEQ_CST)
-#elif defined(_COMPILER_MICROSOFT_)
-// TODO: these only define compiler barriers, and aren't correct outside of x86
-#  define jl_fence() _ReadWriteBarrier()
-#  define jl_fence_release() _WriteBarrier()
-#  define jl_signal_fence() _ReadWriteBarrier()
-#endif
+#define jl_fence() __atomic_thread_fence(__ATOMIC_SEQ_CST)
+#define jl_fence_release() __atomic_thread_fence(__ATOMIC_RELEASE)
+#define jl_signal_fence() __atomic_signal_fence(__ATOMIC_SEQ_CST)
 
 
 #  define jl_atomic_fetch_add_relaxed(obj, arg)         \
