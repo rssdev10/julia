@@ -470,22 +470,26 @@ add_tfunc(arraysize, 2, 2, (@nospecialize(a), @nospecialize(d))->Int, 4)
 function pointer_eltype(@nospecialize(ptr))
     a = widenconst(ptr)
     if a <: Ptr
-        if isa(a,DataType) && isa(a.parameters[1],Type)
+        if isa(a, DataType) && isa(a.parameters[1], Type)
             return a.parameters[1]
-        elseif isa(a,UnionAll) && !has_free_typevars(a)
+        elseif isa(a, UnionAll) && !has_free_typevars(a)
             unw = unwrap_unionall(a)
-            if isa(unw,DataType)
+            if isa(unw, DataType)
                 return rewrap_unionall(unw.parameters[1], a)
             end
         end
     end
     return Any
 end
-add_tfunc(pointerref, 3, 3,
-          function (@nospecialize(a), @nospecialize(i), @nospecialize(align))
-            return pointer_eltype(a)
-          end, 4)
-add_tfunc(pointerset, 4, 4, (@nospecialize(a), @nospecialize(v), @nospecialize(i), @nospecialize(align)) -> a, 5)
+add_tfunc(pointerref, 3, 3, (a, i, align) -> (@nospecialize; pointer_eltype(a)), 4)
+add_tfunc(pointerset, 4, 4, (a, v, i, align) -> (@nospecialize; a), 5)
+
+add_tfunc(atomic_fence, 1, 1, (order) -> (@nospecialize; Nothing), 4)
+add_tfunc(atomic_pointerref, 2, 2, (a, order) -> (@nospecialize; pointer_eltype(a)), 4)
+add_tfunc(atomic_pointerset, 3, 3, (a, v, order) -> (@nospecialize; a), 5)
+add_tfunc(atomic_pointerswap, 3, 3, (a, v, order) -> (@nospecialize; pointer_eltype(a)), 5)
+add_tfunc(atomic_pointermodify, 4, 4, (a, op, v, order) -> (@nospecialize; pointer_eltype(a)), 5)
+add_tfunc(atomic_pointercmpswap, 5, 5, (a, x, v, success_order, failure_order) -> (@nospecialize; Tuple{pointer_eltype(a), Bool}), 5)
 
 # more accurate typeof_tfunc for vararg tuples abstract only in length
 function typeof_concrete_vararg(t::DataType)
@@ -749,10 +753,8 @@ function getfield_nothrow(@nospecialize(s00), @nospecialize(name), boundscheck::
     return false
 end
 
-getfield_tfunc(@nospecialize(s00), @nospecialize(name), @nospecialize(boundscheck_or_order)) =
-    getfield_tfunc(s00, name)
-getfield_tfunc(@nospecialize(s00), @nospecialize(name), @nospecialize(order), @nospecialize(boundscheck)) =
-    getfield_tfunc(s00, name)
+getfield_tfunc(s00, name, boundscheck_or_order) = (@nospecialize; getfield_tfunc(s00, name))
+getfield_tfunc(s00, name, order, boundscheck) = (@nospecialize; getfield_tfunc(s00, name))
 function getfield_tfunc(@nospecialize(s00), @nospecialize(name))
     s = unwrap_unionall(s00)
     if isa(s, Union)
@@ -908,8 +910,21 @@ end
 setfield!_tfunc(o, f, v, order) = (@nospecialize; v)
 setfield!_tfunc(o, f, v) = (@nospecialize; v)
 
+swapfield!_tfunc(o, f, v, order) = (@nospecialize; getfield_tfunc(o, f))
+swapfield!_tfunc(o, f, v) = (@nospecialize; getfield_tfunc(o, f))
+modifyfield!_tfunc(o, f, op, v, order) = (@nospecialize; getfield_tfunc(o, f))
+modifyfield!_tfunc(o, f, op, v) = (@nospecialize; getfield_tfunc(o, f)) # TODO: also model op(o.f, v) call
+cmpswapfield!_tfunc(o, f, x, v, success_order, failure_order) = (@nospecialize; cmpswapfield!_tfunc(o, f, x, v))
+cmpswapfield!_tfunc(o, f, x, v, success_order) = (@nospecialize; cmpswapfield!_tfunc(o, f, x, v))
+cmpswapfield!_tfunc(o, f, x, v) = (@nospecialize; Tuple{widenconst(getfield_tfunc(o, f)), Bool})
+# we could use tuple_tfunc instead of widenconst, but `o` is mutable, so that is unlikely to be beneficial
+
 add_tfunc(getfield, 2, 4, getfield_tfunc, 1)
 add_tfunc(setfield!, 3, 4, setfield!_tfunc, 3)
+
+add_tfunc(swapfield!, 3, 4, swapfield!_tfunc, 3)
+add_tfunc(modifyfield!, 4, 5, modifyfield!_tfunc, 3)
+add_tfunc(cmpswapfield!, 4, 6, cmpswapfield!_tfunc, 3)
 
 function fieldtype_nothrow(@nospecialize(s0), @nospecialize(name))
     s0 === Bottom && return true # unreachable
