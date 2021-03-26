@@ -1809,7 +1809,8 @@ extern "C" int jl_test_cpu_feature(jl_cpu_feature_t feature)
 
 #ifdef _CPU_AARCH64_
 // FPCR FZ, bit [24]
-static constexpr uint32_t fpcr_fz_mask = 1 << 24;
+// FPCR FZ16, bit [19]
+static constexpr uint32_t fpcr_fz_mask = 1 << 24 | 1 << 19;
 // FPCR DN, bit [25]
 static constexpr uint32_t fpcr_dn_mask = 1 << 25;
 
