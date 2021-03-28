@@ -31,16 +31,21 @@ function show_ir(io::IO, code::IRCode, expr_type_printer=default_expr_type_print
         maxused = maximum(used)
         maxlength_idx = length(string(maxused))
     end
-    if !verbose_linetable
-        (loc_annotations, loc_methods, loc_lineno) = compute_ir_line_annotations(code)
-        max_loc_width = maximum(length(str) for str in loc_annotations)
-        max_lineno_width = maximum(length(str) for str in loc_lineno)
-        max_method_width = maximum(length(str) for str in loc_methods)
+    #if !verbose_linetable
+    #    (loc_annotations, loc_methods, loc_lineno) = compute_ir_line_annotations(code)
+    #    max_loc_width = maximum(length(str) for str in loc_annotations)
+    #    max_lineno_width = maximum(length(str) for str in loc_lineno)
+    #    max_method_width = maximum(length(str) for str in loc_methods)
+    #end
+    #max_depth = maximum(compute_inlining_depth(code.linetable, stmts[i][:line]) for i in 1:length(stmts.line))
+    #last_stack = []
+    if verbose_linetable
+        line_info_preprinter = ircode_verbose_linfo_printer(code, used)
+    else
+        line_info_preprinter = ircode_default_linfo_printer(code)
     end
-    max_depth = maximum(compute_inlining_depth(code.linetable, stmts[i][:line]) for i in 1:length(stmts.line))
-    last_stack = []
     for idx in 1:length(stmts)
-        bb_idx = show_ir_stmt2(io, code, idx, expr_type_printer; verbose_linetable)
+        bb_idx = show_ir_stmt2(io, code, idx, line_info_preprinter, default_expr_type_printer, used, cfg, bb_idx, #==# new_nodes_perm, perm_idx, maxlength_idx)
     end
 end
 
@@ -81,10 +86,16 @@ function ircode_default_linfo_printer(code::IRCode)
     end
 end
 
-function ircode_verbose_linfo_printer(code::IRCode)
+function ircode_verbose_linfo_printer(code::IRCode, used::BitSet)
     stmts = code.stmts
     max_depth = maximum(compute_inlining_depth(code.linetable, stmts[i][:line]) for i in 1:length(stmts.line))
     last_stack = Ref(Int[])
+    maxlength_idx = if isempty(used)
+        0
+    else
+        maxused = maximum(used)
+        length(string(maxused))
+    end
 
     function (io::IO, indent::String, idx::Int)
         cols = (displaysize(io)::Tuple{Int,Int})[2]
@@ -99,13 +110,13 @@ function ircode_verbose_linfo_printer(code::IRCode)
             if i > length(last_stack[]) || last_stack[][i] != x
                 entry = code.linetable[x]
                 printstyled(io, "\e[$(start_column)G$(rail)\e[1G", color = :light_black)
-                print(io, bb_guard_rail)
+                print(io, indent) #bb_guard_rail)
                 ssa_guard = " "^(maxlength_idx + 4 + (i - 1))
                 entry_label = "$(ssa_guard)$(method_name(entry)) at $(entry.file):$(entry.line) "
-                hline = string("─"^(start_column-length(entry_label)-length(bb_guard_rail)+max_depth-i), "┐")
+                #hline = string("─"^(start_column-length(entry_label)-length(bb_guard_rail)+max_depth-i), "┐")
+                hline = string("─"^(start_column-length(entry_label)-length(indent)+max_depth-i), "┐")
                 printstyled(io, string(entry_label, hline), "\n"; color=:light_black)
-                bb_guard_rail = bb_guard_rail_cont
-                floop = false
+                #bb_guard_rail = bb_guard_rail_cont
             end
         end
         printstyled(io, "\e[$(start_column)G$(rail)\e[1G", color = :light_black)
@@ -113,7 +124,7 @@ function ircode_verbose_linfo_printer(code::IRCode)
     end
 end
 
-function show_ir_stmt2(io::IO, code::Union{IRCode, CodeInfo}, idx::Int, expr_type_printer; verbose_linetable)
+function show_ir_stmt2(io::IO, code::Union{IRCode, CodeInfo}, idx::Int, line_info_preprinter, line_info_postprinter, used::BitSet, cfg::CFG, bb_idx::Int, #==# new_nodes_perm, perm_idx, maxlength_idx)
     stmts = _stmts(code)
     types = _types(code)
     max_bb_idx_size = length(string(length(cfg.blocks)))
@@ -142,53 +153,56 @@ function show_ir_stmt2(io::IO, code::Union{IRCode, CodeInfo}, idx::Int, expr_typ
     bb_guard_rail_cont = string("│  ", " "^max_bb_idx_size)
     if idx == first(bbrange)
         bb_guard_rail = bb_start_str
+        indent = " "^(max_bb_idx_size+3)
     else
         bb_guard_rail = bb_guard_rail_cont
+        indent = bb_guard_rail
     end
-    floop = true
-    # Print linetable information
-    if verbose_linetable
-        stack = compute_loc_stack(code.linetable, stmt[:line])
-        # We need to print any stack frames that did not exist in the last stack
-        ndepth = max(1, length(stack))
-        rail = string(" "^(max_depth+1-ndepth), "│"^ndepth)
-        start_column = cols - max_depth - 10
-        for (i, x) in enumerate(stack)
-            if i > length(last_stack) || last_stack[i] != x
-                entry = code.linetable[x]
-                printstyled(io, "\e[$(start_column)G$(rail)\e[1G", color = :light_black)
-                print(io, bb_guard_rail)
-                ssa_guard = " "^(maxlength_idx + 4 + (i - 1))
-                entry_label = "$(ssa_guard)$(method_name(entry)) at $(entry.file):$(entry.line) "
-                hline = string("─"^(start_column-length(entry_label)-length(bb_guard_rail)+max_depth-i), "┐")
-                printstyled(io, string(entry_label, hline), "\n"; color=:light_black)
-                bb_guard_rail = bb_guard_rail_cont
-                floop = false
-            end
-        end
-        printstyled(io, "\e[$(start_column)G$(rail)\e[1G", color = :light_black)
-        last_stack = stack
-    else
-        if idx <= length(loc_annotations)
-            # N.B.: The line array length not matching is invalid,
-            # but let's be robust here
-            annotation = loc_annotations[idx]
-            loc_method = loc_methods[idx]
-            lineno = loc_lineno[idx]
-        else
-            annotation = "!"
-            loc_method = ""
-            lineno = ""
-        end
-        # Print location information right aligned. If the line below is too long, it'll overwrite this,
-        # but that's what we want.
-        if get(io, :color, false)
-            method_start_column = cols - max_method_width - max_loc_width - 2
-            filler = " "^(max_loc_width-length(annotation))
-            printstyled(io, "\e[$(method_start_column)G$(annotation)$(filler)$(loc_method)\e[1G", color = :light_black)
-        end
-        printstyled(io, lineno, " "^(max_lineno_width - length(lineno) + 1); color = :light_black)
-    end
+    line_info_preprinter(io, indent, idx)
+    #floop = true
+    ## Print linetable information
+    #if verbose_linetable
+    #    stack = compute_loc_stack(code.linetable, stmt[:line])
+    #    # We need to print any stack frames that did not exist in the last stack
+    #    ndepth = max(1, length(stack))
+    #    rail = string(" "^(max_depth+1-ndepth), "│"^ndepth)
+    #    start_column = cols - max_depth - 10
+    #    for (i, x) in enumerate(stack)
+    #        if i > length(last_stack) || last_stack[i] != x
+    #            entry = code.linetable[x]
+    #            printstyled(io, "\e[$(start_column)G$(rail)\e[1G", color = :light_black)
+    #            print(io, bb_guard_rail)
+    #            ssa_guard = " "^(maxlength_idx + 4 + (i - 1))
+    #            entry_label = "$(ssa_guard)$(method_name(entry)) at $(entry.file):$(entry.line) "
+    #            hline = string("─"^(start_column-length(entry_label)-length(bb_guard_rail)+max_depth-i), "┐")
+    #            printstyled(io, string(entry_label, hline), "\n"; color=:light_black)
+    #            bb_guard_rail = bb_guard_rail_cont
+    #            floop = false
+    #        end
+    #    end
+    #    printstyled(io, "\e[$(start_column)G$(rail)\e[1G", color = :light_black)
+    #    last_stack = stack
+    #else
+    #    if idx <= length(loc_annotations)
+    #        # N.B.: The line array length not matching is invalid,
+    #        # but let's be robust here
+    #        annotation = loc_annotations[idx]
+    #        loc_method = loc_methods[idx]
+    #        lineno = loc_lineno[idx]
+    #    else
+    #        annotation = "!"
+    #        loc_method = ""
+    #        lineno = ""
+    #    end
+    #    # Print location information right aligned. If the line below is too long, it'll overwrite this,
+    #    # but that's what we want.
+    #    if get(io, :color, false)
+    #        method_start_column = cols - max_method_width - max_loc_width - 2
+    #        filler = " "^(max_loc_width-length(annotation))
+    #        printstyled(io, "\e[$(method_start_column)G$(annotation)$(filler)$(loc_method)\e[1G", color = :light_black)
+    #    end
+    #    printstyled(io, lineno, " "^(max_lineno_width - length(lineno) + 1); color = :light_black)
+    #end
     idx != last(bbrange) && print(io, bb_guard_rail)
     print_sep = false
     if idx == last(bbrange)
@@ -201,18 +215,18 @@ function show_ir_stmt2(io::IO, code::Union{IRCode, CodeInfo}, idx::Int, expr_typ
             break
         end
         perm_idx += 1
-        if !floop && !verbose_linetable
-            print(io, " "^(max_lineno_width + 1))
-        end
+        #if !floop && !verbose_linetable
+        #    print(io, " "^(max_lineno_width + 1))
+        #end
         if print_sep
-            if idx == first(bbrange) && floop
+            if idx == first(bbrange)# && floop
                 print(io, bb_start_str)
             else
                 print(io, "│  ", " "^max_bb_idx_size)
             end
         end
         print_sep = true
-        floop = false
+        #floop = false
         new_node = new_nodes[node_idx]
         node_idx += length(stmts)
         show_type = should_print_ssa_type(new_node[:inst])
@@ -226,11 +240,11 @@ function show_ir_stmt2(io::IO, code::Union{IRCode, CodeInfo}, idx::Int, expr_typ
         end
         println(io)
     end
-    if !floop && !verbose_linetable
-        print(io, " "^(max_lineno_width + 1))
-    end
+    #if !floop && !verbose_linetable
+    #    print(io, " "^(max_lineno_width + 1))
+    #end
     if print_sep
-        if idx == first(bbrange) && floop
+        if idx == first(bbrange)# && floop
             print(io, bb_start_str)
         elseif idx == last(bbrange)
             print(io, "└", "─"^(1 + max_bb_idx_size), " ")
@@ -246,7 +260,10 @@ function show_ir_stmt2(io::IO, code::Union{IRCode, CodeInfo}, idx::Int, expr_typ
     if !isassigned(stmts.type, idx) # try to be robust against errors
         printstyled(io, "::#UNDEF", color=:red)
     elseif show_type
-        expr_type_printer(io, stmt[:type], idx in used)
+        line_info_postprinter(io, stmt[:type], idx in used)
     end
     println(io)
+    return bb_idx
+end
+
 end
