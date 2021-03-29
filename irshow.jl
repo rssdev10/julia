@@ -124,11 +124,28 @@ function ircode_verbose_linfo_printer(code::IRCode, used::BitSet)
     end
 end
 
-_stmts(code::IRCode) = code.stmts
-_stmts(code::CodeInfo) = code.code
+struct _UNDEF
+    global const UNDEF = _UNDEF.instance
+end
 
-_types(code::IRCode) = code.argtypes
-_types(code::CodeInfo) = code.ssavaluetypes
+function _stmt(code::IRCode, idx::Int)
+    stmts = code.stmts
+    return isassigned(stmts.inst, idx) ? stmts[idx][:inst] : UNDEF
+end
+function _stmt(code::CodeInfo, idx::Int)
+    code = code.code
+    return isassigned(code, idx) ? code[idx] : UNDEF
+end
+
+function _type(code::IRCode, idx::Int)
+    stmts = code.stmts
+    return isassigned(stmts.type, idx) ? stmts[idx][:type] : UNDEF
+end
+function _type(code::CodeInfo, idx::Int)
+    types = code.ssavaluetypes
+    types isa Vector{Any} || return nothing
+    return isassigned(types, idx) ? types[idx] : UNDEF
+end
 
 function normalize_statement_indices(@nospecialize(stmt), cfg::CFG)
     # convert statement index to labels, as expected by print_stmt
@@ -147,8 +164,8 @@ function normalize_statement_indices(@nospecialize(stmt), cfg::CFG)
 end
 
 function show_ir_stmt2(io::IO, code::Union{IRCode, CodeInfo}, idx::Int, line_info_preprinter, line_info_postprinter, used::BitSet, cfg::CFG, bb_idx::Int, pop_newnode! = _ -> nothing)
-    stmts = _stmts(code)
-    types = _types(code)
+    stmt = _stmt(code, idx)
+    type = _type(code, idx)
     max_bb_idx_size = length(string(length(cfg.blocks)))
 
     if isempty(used)
@@ -158,59 +175,20 @@ function show_ir_stmt2(io::IO, code::Union{IRCode, CodeInfo}, idx::Int, line_inf
         maxlength_idx = length(string(maxused))
     end
 
-    if !isassigned(stmts.inst, idx)
+    if stmt === UNDEF
         # This is invalid, but do something useful rather
         # than erroring, to make debugging easier
         printstyled(io, "#UNDEF\n", color=:red)
         return bb_idx
     end
-    stmt = stmts[idx]
-    # Compute BB guard rail
-    if bb_idx > length(cfg.blocks)
-        # If invariants are violated, print a special leader
-        linestart = " "^(max_bb_idx_size + 2) # not inside a basic block bracket
-        inlining_indent = line_info_preprinter(io, linestart, idx)
-        printstyled(io, "!!! ", "─"^max_bb_idx_size, color=:light_black)
-    else
-        bbrange = cfg.blocks[bb_idx].stmts
-        bbrange = bbrange.start:bbrange.stop
-        # Print line info update
-        linestart = idx == first(bbrange) ? "  " : sprint(io -> printstyled(io, "│ ", color=:light_black), context=io)
-        linestart *= " "^max_bb_idx_size
-        inlining_indent = line_info_preprinter(io, linestart, idx)
-        if idx == first(bbrange)
-            bb_idx_str = string(bb_idx)
-            bb_pad = max_bb_idx_size - length(bb_idx_str)
-            bb_type = length(cfg.blocks[bb_idx].preds) <= 1 ? "─" : "┄"
-            printstyled(io, bb_idx_str, " ", bb_type, "─"^bb_pad, color=:light_black)
-        elseif idx == last(bbrange) # print separator
-            printstyled(io, "└", "─"^(1 + max_bb_idx_size), color=:light_black)
-        else
-            printstyled(io, "│ ", " "^max_bb_idx_size, color=:light_black)
-        end
-    end
-    print(io, inlining_indent, " ")
-    
-    # print new nodes first in the right position
-    while (next = pop_newnode!(idx)) !== nothing
-        node_idx, new_node = next
-        show_type = should_print_ssa_type(new_node[:inst])
-        with_output_color(:green, io) do io′
-            print_stmt(io′, node_idx, new_node[:inst], used, maxlength_idx, false, show_type)
-        end
-        if !isassigned(stmts.type, idx) # try to be robust against errors
-            printstyled(io, "::#UNDEF", color=:red)
-        elseif show_type
-            expr_type_printer(io, new_node[:type], node_idx in used)
-        end
-        println(io)
-        
-
+    i = 1
+    while true
+        next = pop_newnode!(idx)
         # Compute BB guard rail
         if bb_idx > length(cfg.blocks)
             # If invariants are violated, print a special leader
             linestart = " "^(max_bb_idx_size + 2) # not inside a basic block bracket
-            inlining_indent = line_info_preprinter(io, linestart, 0)
+            inlining_indent = line_info_preprinter(io, linestart, i == 1 ? idx : 0)
             printstyled(io, "!!! ", "─"^max_bb_idx_size, color=:light_black)
         else
             bbrange = cfg.blocks[bb_idx].stmts
@@ -218,22 +196,55 @@ function show_ir_stmt2(io::IO, code::Union{IRCode, CodeInfo}, idx::Int, line_inf
             # Print line info update
             linestart = idx == first(bbrange) ? "  " : sprint(io -> printstyled(io, "│ ", color=:light_black), context=io)
             linestart *= " "^max_bb_idx_size
-            inlining_indent = line_info_preprinter(io, linestart, 0)
-            printstyled(io, "│ ", " "^max_bb_idx_size, color=:light_black)
+            inlining_indent = line_info_preprinter(io, linestart, i == 1 ? idx : 0)
+
+            if i == 1 && idx == first(bbrange)
+                bb_idx_str = string(bb_idx)
+                bb_pad = max_bb_idx_size - length(bb_idx_str)
+                bb_type = length(cfg.blocks[bb_idx].preds) <= 1 ? "─" : "┄"
+                printstyled(io, bb_idx_str, " ", bb_type, "─"^bb_pad, color=:light_black)
+            elseif next === nothing && idx == last(bbrange) # print separator
+                printstyled(io, "└", "─"^(1 + max_bb_idx_size), color=:light_black)
+            else
+                printstyled(io, "│ ", " "^max_bb_idx_size, color=:light_black)
+            end
         end
         print(io, inlining_indent, " ")
+
+        if next === nothing
+            if bb_idx <= length(cfg.blocks) && idx == last(bbrange)
+                bb_idx += 1
+            end
+            break
+        end
+
+        # print new nodes first in the right position
+        node_idx, new_node = next
+        show_type = should_print_ssa_type(new_node[:inst])
+        with_output_color(:green, io) do io′
+            print_stmt(io′, node_idx, new_node[:inst], used, maxlength_idx, false, show_type)
+        end
+        if !isassigned(code.stmts.type, idx) # try to be robust against errors
+            printstyled(io, "::#UNDEF", color=:red)
+        elseif show_type
+            line_info_postprinter(io, new_node[:type], node_idx in used)
+        end
+        println(io)
+        i += 1
     end
-    show_type = should_print_ssa_type(stmt[:inst])
-    print_stmt(io, idx, stmt[:inst], used, maxlength_idx, true, show_type)
-    if !isassigned(stmts.type, idx) # try to be robust against errors
-        printstyled(io, "::#UNDEF", color=:red)
-    elseif show_type
-        line_info_postprinter(io, stmt[:type], idx in used)
+    stmt = normalize_statement_indices(stmt, cfg)
+    show_type = type !== nothing && should_print_ssa_type(stmt)
+    print_stmt(io, idx, stmt, used, maxlength_idx, true, show_type)
+    if type !== nothing # ignore types for pre-inference code
+        if type === UNDEF
+            # This is an error, but can happen if passes don't update their type information
+            printstyled(io, "::#UNDEF", color=:red)
+        elseif show_type
+            typ = _type(code, idx)
+            line_info_postprinter(io, typ, idx in used)
+        end
     end
     println(io)
-    if bb_idx <= length(cfg.blocks) && idx == last(bbrange)
-        bb_idx += 1
-    end
     return bb_idx
 end
 
